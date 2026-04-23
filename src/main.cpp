@@ -87,15 +87,15 @@ int maze[MAZE_SIZE][MAZE_SIZE] = {
 
 bool isColliding(glm::vec3 pos) {
     float objectRadius = 0.3f;
-    for (int row = 0; row < MAZE_SIZE; row++) {
-        for (int col = 0; col < MAZE_SIZE; col++) {
-            if (maze[row][col] == 1) {
-                float wallX = col * 2.0f; float wallZ = row * 2.0f;
-                if (pos.x + objectRadius > wallX - 1.0f && pos.x - objectRadius < wallX + 1.0f &&
-                    pos.z + objectRadius > wallZ - 1.0f && pos.z - objectRadius < wallZ + 1.0f) return true;
-            }
-        }
-    }
+    // Check only the 4 nearby cells instead of all 625
+    int minCol = (int)((pos.x - objectRadius + 1.0f) / 2.0f);
+    int maxCol = (int)((pos.x + objectRadius + 1.0f) / 2.0f);
+    int minRow = (int)((pos.z - objectRadius + 1.0f) / 2.0f);
+    int maxRow = (int)((pos.z + objectRadius + 1.0f) / 2.0f);
+    for (int row = minRow; row <= maxRow; row++)
+        for (int col = minCol; col <= maxCol; col++)
+            if (row >= 0 && row < MAZE_SIZE && col >= 0 && col < MAZE_SIZE)
+                if (maze[row][col] == 1) return true;
     return false;
 }
 
@@ -156,27 +156,29 @@ struct PatrolEnemy {
         currentPos.y = baseY + cos(globalTime * 2.5f + timeOffset) * 0.3f;
         if (sound) sound->SetPosition(currentPos);
 
-        int emitCount = 1 + (rand() % 2);
-        for (int i = 0; i < emitCount; ++i) {
-            Particle p;
-            p.position = currentPos + glm::vec3(((rand() % 100) / 100.0f - 0.5f) * 0.3f, 0.1f, ((rand() % 100) / 100.0f - 0.5f) * 0.3f);
-            p.velocity = glm::vec3(((rand() % 100) / 100.0f - 0.5f) * 0.6f, 0.5f + ((rand() % 100) / 100.0f) * 1.5f, ((rand() % 100) / 100.0f - 0.5f) * 0.6f);
-            p.maxLife = 0.3f + ((rand() % 100) / 100.0f) * 0.5f;
-            p.life = p.maxLife;
-            p.size = 0.01f + ((rand() % 100) / 100.0f) * 0.03f;
-            p.color = glm::vec3(1.0f, 0.3f + ((rand() % 100) / 100.0f) * 0.4f, 0.0f);
-            particles.push_back(p);
-        }
-
-        for (auto it = particles.begin(); it != particles.end(); ) {
-            it->life -= dt;
-            if (it->life > 0.0f) {
-                glm::vec3 nextPPos = it->position + it->velocity * dt;
-                if (isColliding(nextPPos) || nextPPos.y >= 2.0f) { it = particles.erase(it); continue; }
-                else { it->position = nextPPos; }
-                ++it;
+        if (particles.size() < 40) {
+            int emitCount = 1 + (rand() % 2);
+            for (int i = 0; i < emitCount; ++i) {
+                Particle p;
+                p.position = currentPos + glm::vec3(((rand() % 100) / 100.0f - 0.5f) * 0.3f, 0.1f, ((rand() % 100) / 100.0f - 0.5f) * 0.3f);
+                p.velocity = glm::vec3(((rand() % 100) / 100.0f - 0.5f) * 0.6f, 0.5f + ((rand() % 100) / 100.0f) * 1.5f, ((rand() % 100) / 100.0f - 0.5f) * 0.6f);
+                p.maxLife = 0.3f + ((rand() % 100) / 100.0f) * 0.5f;
+                p.life = p.maxLife;
+                p.size = 0.01f + ((rand() % 100) / 100.0f) * 0.03f;
+                p.color = glm::vec3(1.0f, 0.3f + ((rand() % 100) / 100.0f) * 0.4f, 0.0f);
+                particles.push_back(p);
             }
-            else { it = particles.erase(it); }
+
+            for (auto it = particles.begin(); it != particles.end(); ) {
+                it->life -= dt;
+                if (it->life > 0.0f) {
+                    glm::vec3 nextPPos = it->position + it->velocity * dt;
+                    if (isColliding(nextPPos) || nextPPos.y >= 2.0f) { it = particles.erase(it); continue; }
+                    else { it->position = nextPPos; }
+                    ++it;
+                }
+                else { it = particles.erase(it); }
+            }
         }
     }
 };
@@ -417,10 +419,26 @@ int main() {
         for (int r = 0; r < MAZE_SIZE; r++) {
             for (int c = 0; c < MAZE_SIZE; c++) {
                 glm::vec3 pos(c * 2.0f, 0.0f, r * 2.0f);
-                if (maze[r][c] == 1) { wallTex.Bind(0); mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos)); cubeModel.Draw(); }
+                if (glm::distance(glm::vec2(pos.x, pos.z),
+                    glm::vec2(camera.Position.x, camera.Position.z)) > 20.0f)
+                    continue;
+                if (maze[r][c] == 1) {
+                    wallTex.Bind(0);
+                    glm::mat4 model = glm::translate(glm::mat4(1.0f), pos);
+                    mainShader.setMat4("model", model);
+                    mainShader.setMat3("normalMatrix", glm::mat3(glm::transpose(glm::inverse(model)))); // ADD
+                    cubeModel.Draw();
+                }
                 else {
-                    floorTex.Bind(0); mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, -2, 0))); cubeModel.Draw();
-                    mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, 2, 0))); cubeModel.Draw();
+                    floorTex.Bind(0);
+                    glm::mat4 modelFloor = glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, -2, 0));
+                    mainShader.setMat4("model", modelFloor);
+                    mainShader.setMat3("normalMatrix", glm::mat3(glm::transpose(glm::inverse(modelFloor)))); // ADD
+                    cubeModel.Draw();
+                    glm::mat4 modelCeil = glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, 2, 0));
+                    mainShader.setMat4("model", modelCeil);
+                    mainShader.setMat3("normalMatrix", glm::mat3(glm::transpose(glm::inverse(modelCeil)))); // ADD
+                    cubeModel.Draw();
                 }
             }
         }
@@ -430,8 +448,11 @@ int main() {
             mainShader.setVec3("objectColor", bunny.color);
             glm::mat4 m = glm::translate(glm::mat4(1.0f), bunny.position);
             m = glm::translate(m, glm::vec3(0.0f, sin(t * 3.0f) * 0.15f, 0.0f));
-            m = glm::rotate(m, t * 1.2f, glm::vec3(0, 1, 0)); m = glm::scale(m, glm::vec3(0.1f));
-            mainShader.setMat4("model", m); bunnyModel.Draw();
+            m = glm::rotate(m, t * 1.2f, glm::vec3(0, 1, 0));
+            m = glm::scale(m, glm::vec3(0.1f));
+            mainShader.setMat4("model", m);
+            mainShader.setMat3("normalMatrix", glm::mat3(glm::transpose(glm::inverse(m)))); // ADD
+            bunnyModel.Draw();
         }
         mainShader.setBool("useTexture", true); mainShader.setVec3("objectColor", glm::vec3(1)); mainShader.setFloat("alpha", 0.8f);
         mainShader.setFloat("shininess", 32.0f); mainShader.setFloat("specularStrength", 0.5f);
@@ -439,7 +460,10 @@ int main() {
             skullTex.Bind(0); glm::mat4 m = glm::translate(glm::mat4(1.0f), enemy.currentPos);
             float angle = atan2(enemy.velocity.x, enemy.velocity.z);
             m = glm::rotate(m, angle, glm::vec3(0, 1, 0)); m = glm::rotate(m, glm::radians(-90.0f), glm::vec3(1, 0, 0));
-            m = glm::scale(m, glm::vec3(0.03f)); mainShader.setMat4("model", m); skullModel.Draw();
+            m = glm::scale(m, glm::vec3(0.03f));
+            mainShader.setMat4("model", m);
+            mainShader.setMat3("normalMatrix", glm::mat3(glm::transpose(glm::inverse(m)))); // ADD
+            skullModel.Draw();
         }
         mainShader.setBool("isParticle", true); mainShader.setBool("useTexture", false);
         for (auto& enemy : enemies) {
