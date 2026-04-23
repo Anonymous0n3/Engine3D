@@ -1,4 +1,4 @@
-// main.cpp
+// main.cpp - Hlavní vstupní bod aplikace Haunted Maze
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -11,12 +11,12 @@
 #include <cstdlib> 
 #include <ctime>   
 
-// --- DEAR IMGUI ---
+// --- KNIHOVNY TŘETÍCH STRAN ---
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
-// --- NAŠE VLASTNÍ MODULY ---
+// --- VLASTNÍ MODULY ENGINE ---
 #include "Camera.h"
 #include "Performance.h"
 #include "Shader.h"
@@ -24,34 +24,37 @@
 #include "Model.h"
 #include "Audio.h"
 
-// --- KONSTANTY A GLOBÁLNÍ NASTAVENÍ ---
+/**
+ * @section Nastavení a Globální Instance
+ */
 const unsigned int SCR_WIDTH = 1280;
 const unsigned int SCR_HEIGHT = 720;
 
-/** @brief Instance kamery pro pohyb a výpočet view matice. */
 Camera camera(glm::vec3(2.0f, 0.0f, 2.0f));
-/** @brief Sledování výkonu (FPS, DeltaTime). */
 PerformanceTracker perfTracker;
 
-// Pomocné proměnné pro ovládání myši
+// Vstupní data myši
 float lastX = SCR_WIDTH / 2.0f;
 float lastY = SCR_HEIGHT / 2.0f;
 bool firstMouse = true;
 
-// --- STAVOVÉ PROMĚNNÉ HRY ---
-bool inMainMenu = true;     // Úvodní obrazovka
-bool inMenu = false;         // Pauza
-bool isGameOver = false;     // Prohra (kolize s nepřítelem)
-bool isGameWon = false;      // Výhra (sebrání všech králíků)
-bool showDebug = true;       // Zobrazení FPS a souřadnic
-bool flashlightOn = true;    // Stav baterky hráče
-
-// Nastavení zobrazení
+/**
+ * @section Stavové Proměnné Hry
+ */
+bool inMainMenu = true;
+bool inMenu = false;
+bool isGameOver = false;
+bool isGameWon = false;
+bool showDebug = true;
+bool flashlightOn = true;
 bool isFullscreen = false;
 bool vsyncEnabled = true;
 bool msaaEnabled = true;
+int windowedX, windowedY, windowedWidth, windowedHeight;
 
-// --- FYZIKA, POHYB A ZVUKY ---
+/**
+ * @section Fyzika a Pohyb
+ */
 float verticalVelocity = 0.0f;
 const float GRAVITY = -18.0f;
 const float JUMP_FORCE = 7.0f;
@@ -60,8 +63,10 @@ bool isGrounded = true;
 bool isWalking = false;
 std::unique_ptr<Sound3D> footstepSound;
 
-// --- DEFINICE BLUDIŠTĚ ---
-// 1 = zeď, 0 = cesta
+/**
+ * @section Definice Bludiště
+ * 1 = Zeď, 0 = Volná cesta
+ */
 const int MAZE_SIZE = 25;
 int maze[MAZE_SIZE][MAZE_SIZE] = {
     {1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1},
@@ -92,9 +97,7 @@ int maze[MAZE_SIZE][MAZE_SIZE] = {
 };
 
 /**
- * @brief Detekce kolizí hráče nebo entit se zdmi bludiště.
- * @param pos Pozice ke kontrole.
- * @return True, pokud dochází ke kolizi se zdí.
+ * Kontrola kolizí s bludištěm (AABB vs Maze Grid)
  */
 bool isColliding(glm::vec3 pos) {
     float objectRadius = 0.3f;
@@ -102,7 +105,6 @@ bool isColliding(glm::vec3 pos) {
         for (int col = 0; col < MAZE_SIZE; col++) {
             if (maze[row][col] == 1) {
                 float wallX = col * 2.0f; float wallZ = row * 2.0f;
-                // AABB kolize v ose X a Z
                 if (pos.x + objectRadius > wallX - 1.0f && pos.x - objectRadius < wallX + 1.0f &&
                     pos.z + objectRadius > wallZ - 1.0f && pos.z - objectRadius < wallZ + 1.0f) return true;
             }
@@ -111,13 +113,21 @@ bool isColliding(glm::vec3 pos) {
     return false;
 }
 
-/** @brief Callback pro zachytávání chyb z OpenGL. */
+/**
+ * OpenGL Debug Callback - Výpis chyb a varování z ovladače
+ */
 void APIENTRY glDebugOutput(GLenum source, GLenum type, unsigned int id, GLenum severity, GLsizei length, const char* message, const void* userParam) {
     if (id == 131169 || id == 131185 || id == 131218 || id == 131204) return;
     std::cout << "[OpenGL Debug] " << message << std::endl;
 }
 
-/** @brief Pomocná funkce pro získání absolutní cesty k assetům. */
+#ifndef RESOURCE_DIR
+#define RESOURCE_DIR ""
+#endif
+
+/**
+ * Pomocná funkce pro lokalizaci souborů assetů
+ */
 std::string getAssetPath(const std::string& relativePath) {
     std::string path = std::string(RESOURCE_DIR) + relativePath;
     if (std::filesystem::exists(path)) return path;
@@ -125,19 +135,16 @@ std::string getAssetPath(const std::string& relativePath) {
     return relativePath;
 }
 
-// ============================================================================
-// --- HERNÍ ENTITY A SYSTÉM ČÁSTIC ---
-// ============================================================================
+/**
+ * @section Herní Entity a Částicový Systém
+ */
 
-/** @struct Particle
- * @brief Reprezentuje jednu částici v efektu ohně. */
 struct Particle {
     glm::vec3 position, velocity, color;
     float life, maxLife, size;
 };
 
-/** @struct BunnyArtefact
- * @brief Sběratelný předmět vydávající zvuk. */
+// Sběratelský předmět (králík)
 struct BunnyArtefact {
     glm::vec3 position;
     glm::vec3 color;
@@ -154,8 +161,7 @@ struct BunnyArtefact {
 };
 std::vector<BunnyArtefact> bunnies;
 
-/** @struct PatrolEnemy
- * @brief Nepřítel pohybující se v bludišti, vypouštějící částice. */
+// Nepřítel hlídkující v bludišti
 struct PatrolEnemy {
     glm::vec3 currentPos;
     glm::vec3 velocity;
@@ -173,9 +179,8 @@ struct PatrolEnemy {
         sound->Play();
     }
 
-    /** @brief Logika pohybu a emise částic nepřítele. */
     void Update(float dt, float globalTime) {
-        // Lineární pohyb a odraz od zdí
+        // Logika pohybu a odrazů od zdí
         glm::vec3 nextPos = currentPos;
         nextPos.x += velocity.x * dt;
         nextPos.z += velocity.z * dt;
@@ -183,17 +188,23 @@ struct PatrolEnemy {
         if (isColliding(nextPos)) velocity = -velocity;
         else { currentPos.x = nextPos.x; currentPos.z = nextPos.z; }
 
-        // Sinusové houpání nahoru/dolů (levitace)
         currentPos.y = baseY + cos(globalTime * 2.5f + timeOffset) * 0.3f;
 
         if (sound) sound->SetPosition(currentPos);
 
-        // --- EMITTER ČÁSTIC (Oheň/Jiskry) ---
+        // Emitování částic (vizuální efekt ohně/energie)
         int emitCount = 1 + (rand() % 2);
         for (int i = 0; i < emitCount; ++i) {
             Particle p;
-            p.position = currentPos + glm::vec3(((rand() % 100) / 100.0f - 0.5f) * 0.3f, 0.1f, ((rand() % 100) / 100.0f - 0.5f) * 0.3f);
-            p.velocity = glm::vec3(((rand() % 100) / 100.0f - 0.5f) * 0.6f, 0.5f + ((rand() % 100) / 100.0f) * 1.5f, ((rand() % 100) / 100.0f - 0.5f) * 0.6f);
+            float offsetX = ((rand() % 100) / 100.0f - 0.5f) * 0.3f;
+            float offsetZ = ((rand() % 100) / 100.0f - 0.5f) * 0.3f;
+            p.position = currentPos + glm::vec3(offsetX, 0.1f, offsetZ);
+
+            float velX = ((rand() % 100) / 100.0f - 0.5f) * 0.6f;
+            float velY = 0.5f + ((rand() % 100) / 100.0f) * 1.5f;
+            float velZ = ((rand() % 100) / 100.0f - 0.5f) * 0.6f;
+            p.velocity = glm::vec3(velX, velY, velZ);
+
             p.maxLife = 0.3f + ((rand() % 100) / 100.0f) * 0.5f;
             p.life = p.maxLife;
             p.size = 0.01f + ((rand() % 100) / 100.0f) * 0.03f;
@@ -201,12 +212,11 @@ struct PatrolEnemy {
             particles.push_back(p);
         }
 
-        // --- AKTUALIZACE ČÁSTIC ---
+        // Update částic s kolizemi
         for (auto it = particles.begin(); it != particles.end(); ) {
             it->life -= dt;
             if (it->life > 0.0f) {
                 glm::vec3 nextPPos = it->position + it->velocity * dt;
-                // Částice zaniknou při kolizi se zdí nebo stropem
                 if (isColliding(nextPPos) || nextPPos.y >= 2.0f) { it = particles.erase(it); continue; }
                 else { it->position = nextPPos; }
                 ++it;
@@ -218,39 +228,43 @@ struct PatrolEnemy {
 std::vector<PatrolEnemy> enemies;
 
 /**
- * @brief Resetuje herní svět, vygeneruje náhodně králíčky a nepřátele.
+ * Inicializace / Reset herního světa
  */
 void resetGame(AudioEngine& audio) {
     camera = Camera(glm::vec3(2.0f, 0.0f, 2.0f));
     bunnies.clear();
     enemies.clear();
 
-    // Generování artefaktů (králíčků)
+    // Spawn králíčků (náhodné pozice mimo spawn hráče)
     int numBunnies = 3 + (rand() % 8);
     for (int i = 0; i < numBunnies; i++) {
         int r, c;
         do { r = rand() % MAZE_SIZE; c = rand() % MAZE_SIZE; } while (maze[r][c] == 1 || (r <= 2 && c <= 2));
+
         glm::vec3 color((rand() % 100) / 100.0f, (rand() % 100) / 100.0f, (rand() % 100) / 100.0f);
         if (color.r < 0.2f && color.g < 0.2f && color.b < 0.2f) color = glm::vec3(0.8f, 0.8f, 0.8f);
+
         bunnies.emplace_back(glm::vec3(c * 2.0f, -0.5f, r * 2.0f), color, audio, getAssetPath("assets/audio/artefact.mp3"));
     }
 
-    // Generování nepřátel
+    // Spawn nepřátel
     int numGuards = 2 + (rand() % 4);
     for (int i = 0; i < numGuards; i++) {
         int r, c;
         do { r = rand() % MAZE_SIZE; c = rand() % MAZE_SIZE; } while (maze[r][c] == 1 || (r <= 4 && c <= 4));
+
         glm::vec3 vel(0.0f);
         if (rand() % 2 == 0) vel.x = (rand() % 2 == 0) ? 2.5f : -2.5f;
         else vel.z = (rand() % 2 == 0) ? 2.5f : -2.5f;
-        enemies.emplace_back(glm::vec3(c * 2.0f, 0.0f, r * 2.0f), vel, (rand() % 100) / 10.0f, audio, getAssetPath("assets/audio/ghost.mp3"));
+
+        float offset = (rand() % 100) / 10.0f;
+        enemies.emplace_back(glm::vec3(c * 2.0f, 0.0f, r * 2.0f), vel, offset, audio, getAssetPath("assets/audio/ghost.mp3"));
     }
 }
 
-// ============================================================================
-// --- CALLBACKY A VSTUP ---
-// ============================================================================
-
+/**
+ * @section Callbacks pro Vstup
+ */
 void framebuffer_size_callback(GLFWwindow* window, int width, int height) { glViewport(0, 0, width, height); }
 
 void mouse_callback(GLFWwindow* window, double xposIn, double yposIn) {
@@ -265,15 +279,19 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
     if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
         if (!inMainMenu && !isGameOver && !isGameWon) {
             inMenu = !inMenu;
-            if (inMenu) glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            if (inMenu) { glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
             else { glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED); firstMouse = true; }
         }
     }
-    if (key == GLFW_KEY_F3 && action == GLFW_PRESS) showDebug = !showDebug;
-    if (key == GLFW_KEY_F && action == GLFW_PRESS && !inMenu && !inMainMenu && !isGameOver && !isGameWon) flashlightOn = !flashlightOn;
+    if (key == GLFW_KEY_F3 && action == GLFW_PRESS) { showDebug = !showDebug; }
+    if (key == GLFW_KEY_F && action == GLFW_PRESS && !inMenu && !inMainMenu && !isGameOver && !isGameWon) {
+        flashlightOn = !flashlightOn;
+    }
 }
 
-/** @brief Zpracování spojitého vstupu (pohyb, skok) a fyzika hráče. */
+/**
+ * Zpracování uživatelského vstupu a herní fyziky
+ */
 void processInput(GLFWwindow* window) {
     float dt = perfTracker.deltaTime;
     glm::vec3 oldPos = camera.Position;
@@ -287,15 +305,14 @@ void processInput(GLFWwindow* window) {
     // Skok
     if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS && isGrounded) { verticalVelocity = JUMP_FORCE; isGrounded = false; }
 
-    // Fyzika (Gravitace a vertikální pohyb)
+    // Gravitace a vertikální pohyb
     verticalVelocity += GRAVITY * dt;
     camera.Position.y += verticalVelocity * dt;
 
-    // Kolize se zemí a stropem
     if (camera.Position.y >= 0.8f) { camera.Position.y = 0.8f; if (verticalVelocity > 0.0f) verticalVelocity = 0.0f; }
     if (camera.Position.y <= 0.0f) { camera.Position.y = 0.0f; verticalVelocity = 0.0f; isGrounded = true; }
 
-    // Rozdělená detekce kolizí pro osu X a Z (umožňuje "klouzání" podél zdí)
+    // Kolize (rozklad na osy pro plynulé klouzání po zdi)
     glm::vec3 newPos = camera.Position;
     camera.Position = oldPos;
     camera.Position.x = newPos.x;
@@ -315,21 +332,20 @@ void processInput(GLFWwindow* window) {
         if (isWalking) footstepSound->SetPosition(camera.Position);
     }
 
-    // Sběr králíčků
+    // Sbírání králíčků
     for (auto it = bunnies.begin(); it != bunnies.end(); ) {
         if (glm::distance(camera.Position, it->position) < 1.2f) { it->sound->Stop(); it = bunnies.erase(it); }
         else ++it;
     }
 }
 
-// ============================================================================
-// --- HLAVNÍ FUNKCE ---
-// ============================================================================
-
+/**
+ * @section Hlavní Funkce
+ */
 int main() {
     srand((unsigned int)time(NULL));
 
-    // --- INICIALIZACE GLFW A OPENGL ---
+    // Inicializace GLFW a nastavení OpenGL kontextu
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
@@ -342,7 +358,7 @@ int main() {
     glfwSwapInterval(vsyncEnabled ? 1 : 0);
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
-    // Zapnutí OpenGL Debuggingu
+    // Zapnutí OpenGL debugování
     int flags; glGetIntegerv(GL_CONTEXT_FLAGS, &flags);
     if (flags & GL_CONTEXT_FLAG_DEBUG_BIT) {
         glEnable(GL_DEBUG_OUTPUT);
@@ -350,24 +366,25 @@ int main() {
         glDebugMessageCallback(glDebugOutput, nullptr);
     }
 
+    // Registrace callbacků
     glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
     glfwSetCursorPosCallback(window, mouse_callback);
     glfwSetKeyCallback(window, key_callback);
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 
-    // --- IMGUI INICIALIZACE ---
+    // Inicializace ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 460");
 
-    // --- NASTAVENÍ RENDERERU ---
+    // Nastavení globálních OpenGL stavů
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glEnable(GL_CULL_FACE);
 
-    // --- NAČÍTÁNÍ ASSETŮ ---
+    // Načítání assetů
     Shader mainShader(getAssetPath("assets/shaders/main.vert").c_str(), getAssetPath("assets/shaders/main.frag").c_str());
     Model cubeModel(getAssetPath("assets/models/cube.obj"));
     Model bunnyModel(getAssetPath("assets/models/bunny.obj"));
@@ -385,9 +402,9 @@ int main() {
 
     resetGame(audio);
 
-    // ============================================================================
-    // --- HLAVNÍ HERNÍ SMYČKA ---
-    // ============================================================================
+    /**
+     * @section Main Render Loop
+     */
     while (!glfwWindowShouldClose(window)) {
         perfTracker.Update(window);
         float t = (float)glfwGetTime();
@@ -395,22 +412,27 @@ int main() {
 
         if (ambientSound) ambientSound->SetPosition(camera.Position);
 
-        // --- AKTUALIZACE LOGIKY (Jen pokud se hraje) ---
+        // --- UPDATE LOGIKA ---
         if (!inMenu && !inMainMenu && !isGameOver && !isGameWon) {
             processInput(window);
             audio.UpdateListener(camera.Position, camera.Front, camera.Up);
             for (auto& enemy : enemies) {
                 enemy.Update(dt, t);
-                // Prohra při doteku nepřítele
-                if (glm::distance(camera.Position, enemy.currentPos) < 0.8f) { isGameOver = true; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
+                if (glm::distance(camera.Position, enemy.currentPos) < 0.8f) {
+                    isGameOver = true;
+                    glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                }
             }
-            if (bunnies.empty()) { isGameWon = true; glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL); }
+            if (bunnies.empty()) {
+                isGameWon = true;
+                glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+            }
         }
-        else {
-            if (isWalking && footstepSound) { isWalking = false; footstepSound->Stop(); }
+        else if (isWalking && footstepSound) {
+            isWalking = false; footstepSound->Stop();
         }
 
-        // --- RENDERING ---
+        // --- RENDER SCÉNY ---
         glClearColor(0.005f, 0.005f, 0.01f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -424,7 +446,7 @@ int main() {
         mainShader.setMat4("view", camera.GetViewMatrix());
         mainShader.setBool("isParticle", false);
 
-        // --- NASTAVENÍ OSVĚTLENÍ (Shadows/Lights) ---
+        // --- NASTAVENÍ OSVĚTLENÍ (Lights) ---
         mainShader.setVec3("viewPos", camera.Position);
         mainShader.setVec3("dirLight.direction", glm::vec3(-0.2f, -1.0f, -0.3f));
         mainShader.setVec3("dirLight.ambient", glm::vec3(0.02f, 0.02f, 0.04f));
@@ -436,7 +458,7 @@ int main() {
         for (size_t i = 0; i < enemies.size(); i++) {
             std::string n = std::to_string(i);
             mainShader.setVec3("pointLights[" + n + "].position", enemies[i].currentPos);
-            mainShader.setVec3("pointLights[" + n + "].ambient", glm::vec3(0.05f));
+            mainShader.setVec3("pointLights[" + n + "].ambient", glm::vec3(0.05f, 0.05f, 0.05f));
             glm::vec3 pColor = (i % 2 == 0) ? glm::vec3(1, 0.1, 0.1) : glm::vec3(0.1, 1, 0.1);
             mainShader.setVec3("pointLights[" + n + "].diffuse", pColor);
             mainShader.setVec3("pointLights[" + n + "].specular", pColor);
@@ -445,7 +467,7 @@ int main() {
             mainShader.setFloat("pointLights[" + n + "].quadratic", 6.0f);
         }
 
-        // Reflektor (Baterka hráče)
+        // Svítilna hráče (Spotlight)
         bool isFlashlightActive = (!inMenu && !inMainMenu && !isGameOver && !isGameWon && flashlightOn);
         mainShader.setVec3("spotLight.position", camera.Position);
         mainShader.setVec3("spotLight.direction", camera.Front);
@@ -458,25 +480,34 @@ int main() {
             mainShader.setVec3("spotLight.diffuse", glm::vec3(0.0f));
             mainShader.setVec3("spotLight.specular", glm::vec3(0.0f));
         }
+        mainShader.setFloat("spotLight.constant", 1.0f);
+        mainShader.setFloat("spotLight.linear", 0.045f);
+        mainShader.setFloat("spotLight.quadratic", 0.0075f);
         mainShader.setFloat("spotLight.cutOff", glm::cos(glm::radians(12.5f)));
         mainShader.setFloat("spotLight.outerCutOff", glm::cos(glm::radians(17.5f)));
 
-        // --- VYKRESLOVÁNÍ SCÉNY (Bludiště) ---
+        // --- VYKRESLOVÁNÍ GEOMETRIE ---
+
+        // Zdi a podlahy bludiště
         mainShader.setBool("useTexture", true); mainShader.setFloat("alpha", 1.0f);
+        mainShader.setFloat("shininess", 8.0f); mainShader.setFloat("specularStrength", 0.1f);
         for (int r = 0; r < MAZE_SIZE; r++) {
             for (int c = 0; c < MAZE_SIZE; c++) {
                 glm::vec3 pos(c * 2.0f, 0.0f, r * 2.0f);
-                if (maze[r][c] == 1) { wallTex.Bind(0); mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos)); cubeModel.Draw(); }
+                if (maze[r][c] == 1) {
+                    wallTex.Bind(0);
+                    mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos));
+                    cubeModel.Draw();
+                }
                 else {
                     floorTex.Bind(0);
-                    mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, -2, 0))); cubeModel.Draw(); // Podlaha
-                    mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, 2, 0))); cubeModel.Draw();  // Strop
+                    mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, -2, 0))); cubeModel.Draw();
+                    mainShader.setMat4("model", glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, 2, 0))); cubeModel.Draw();
                 }
             }
         }
 
-        // --- VYKRESLOVÁNÍ ENTIT ---
-        // Králíčci (Poloprůhlední, vznášející se)
+        // Artefakty (Králíčci)
         mainShader.setBool("useTexture", false); mainShader.setFloat("alpha", 0.3f);
         mainShader.setFloat("shininess", 256.0f); mainShader.setFloat("specularStrength", 4.0f);
         for (auto& bunny : bunnies) {
@@ -490,15 +521,17 @@ int main() {
 
         // Nepřátelé (Lebky)
         mainShader.setBool("useTexture", true); mainShader.setVec3("objectColor", glm::vec3(1)); mainShader.setFloat("alpha", 0.8f);
+        mainShader.setFloat("shininess", 32.0f); mainShader.setFloat("specularStrength", 0.5f);
         for (auto& enemy : enemies) {
             skullTex.Bind(0); glm::mat4 m = glm::translate(glm::mat4(1.0f), enemy.currentPos);
-            m = glm::rotate(m, atan2(enemy.velocity.x, enemy.velocity.z), glm::vec3(0, 1, 0));
-            m = glm::rotate(m, glm::radians(-90.0f), glm::vec3(1, 0, 0));
+            float angle = atan2(enemy.velocity.x, enemy.velocity.z);
+            m = glm::rotate(m, angle, glm::vec3(0, 1, 0)); m = glm::rotate(m, glm::radians(-90.0f), glm::vec3(1, 0, 0));
             m = glm::scale(m, glm::vec3(0.03f)); mainShader.setMat4("model", m); skullModel.Draw();
         }
 
-        // --- VYKRESLOVÁNÍ ČÁSTIC (Bez osvětlení) ---
-        mainShader.setBool("isParticle", true); mainShader.setBool("useTexture", false);
+        // Částicové efekty
+        mainShader.setBool("isParticle", true);
+        mainShader.setBool("useTexture", false);
         for (auto& enemy : enemies) {
             for (auto& p : enemy.particles) {
                 mainShader.setVec3("objectColor", p.color);
@@ -510,18 +543,18 @@ int main() {
         }
         mainShader.setBool("isParticle", false);
 
-        // --- ROZHRANÍ (GUI) ---
+        // --- HUD A UI MENU ---
         if (showDebug && !inMenu && !inMainMenu && !isGameOver && !isGameWon) {
             ImGui::SetNextWindowPos(ImVec2(10, 10));
-            ImGui::Begin("Debug", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize);
+            ImGui::Begin("Debug", NULL, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings);
             ImGui::Text("FPS: %.1f", ImGui::GetIO().Framerate);
             ImGui::Text("Pozice: %.1f, %.1f, %.1f", camera.Position.x, camera.Position.y, camera.Position.z);
-            ImGui::Text("Baterka (F): %s", flashlightOn ? "ON" : "OFF");
-            ImGui::Text("Zbyva kralicku: %zu", bunnies.size());
+            ImGui::Text("Direkcionalni Lampa (F): %s", flashlightOn ? "ZAP" : "VYP");
+            ImGui::Text("Zbyva artefaktu: %zu", bunnies.size());
             ImGui::End();
         }
 
-        // Lambda funkce pro celoobrazovková menu (Výhra, Prohra, Pauza)
+        // Lambda pro vykreslení fullscreen menu oken
         auto drawFullscreenMenu = [&](const char* title, ImVec4 color, const char* btnText, bool restart) {
             ImGui::SetNextWindowPos(ImVec2(0, 0)); ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
             ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0.75f));
@@ -552,12 +585,11 @@ int main() {
 
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
 
-    // --- UKONČENÍ A CLEANUP ---
+    // --- CLEANUP ---
     footstepSound.reset(); ambientSound.reset();
     ImGui_ImplOpenGL3_Shutdown(); ImGui_ImplGlfw_Shutdown(); ImGui::DestroyContext();
     glfwTerminate();
