@@ -119,6 +119,14 @@ public:
         ma_sound_set_volume(&sound, volume);
     }
 
+    void SetSpatialization(bool enabled) {
+        ma_sound_set_spatialization_enabled(&sound, enabled ? MA_TRUE : MA_FALSE);
+    }
+
+    void SetMinDistance(float distance) {
+        ma_sound_set_min_distance(&sound, distance);
+    }
+
     /**
      * @brief Spustí přehrávání zvuku.
      */
