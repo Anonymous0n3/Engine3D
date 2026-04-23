@@ -22,7 +22,10 @@
 #include "Texture.h"
 #include "Model.h"
 #include "Audio.h"
+#include "Config.h"
 
+const std::string CONFIG_PATH = "config.json";
+Config config;
 const unsigned int SCR_WIDTH = 1280;
 const unsigned int SCR_HEIGHT = 720;
 
@@ -270,6 +273,13 @@ void processInput(GLFWwindow* window) {
 
 int main() {
     srand((unsigned int)time(NULL));
+    config.load(CONFIG_PATH);
+
+    // Apply loaded values to your existing variables
+    vsyncEnabled = config.vsync;
+    msaaEnabled = config.msaa;
+    isFullscreen = config.fullscreen;
+    simpleFlashlight = config.simpleFlashlight;
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
@@ -282,6 +292,16 @@ int main() {
     glfwSwapInterval(vsyncEnabled ? 1 : 0);
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
+    if (msaaEnabled)
+        glEnable(GL_MULTISAMPLE);
+
+    if (isFullscreen) {
+        glfwGetWindowPos(window, &windowedX, &windowedY);
+        glfwGetWindowSize(window, &windowedWidth, &windowedHeight);
+        GLFWmonitor* mon = glfwGetPrimaryMonitor();
+        const GLFWvidmode* mode = glfwGetVideoMode(mon);
+        glfwSetWindowMonitor(window, mon, 0, 0, mode->width, mode->height, mode->refreshRate);
+    }
     glEnable(GL_DEBUG_OUTPUT);
     glDebugMessageCallback(glDebugOutput, nullptr);
 
@@ -556,6 +576,12 @@ int main() {
         glfwSwapBuffers(window);
         glfwPollEvents();
     }
+
+    config.vsync = vsyncEnabled;
+    config.msaa = msaaEnabled;
+    config.fullscreen = isFullscreen;
+    config.simpleFlashlight = simpleFlashlight;
+    config.save(CONFIG_PATH);
 
     footstepSound.reset(); ambientSound.reset();
     ImGui_ImplOpenGL3_Shutdown(); ImGui_ImplGlfw_Shutdown(); ImGui::DestroyContext();

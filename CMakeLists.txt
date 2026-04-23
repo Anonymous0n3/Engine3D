@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 # --- NUCLEAR OPTION: FORCE VCPKG TOOLCHAIN ---
 # Make sure to use forward slashes (/) in the path!
-set(CMAKE_TOOLCHAIN_FILE "C:/Program Files/Microsoft Visual Studio/18/Insiders/VC/vcpkg/scripts/buildsystems/vcpkg.cmake")
+set(CMAKE_TOOLCHAIN_FILE "E:/Programy/vcpkg/vcpkg/scripts/buildsystems/vcpkg.cmake")
 # ---------------------------------------------
 
 project(Engine3D VERSION 1.0.0)

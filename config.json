@@ -1,0 +1,9 @@
+{
+    "fullscreen": true,
+    "masterVolume": 1.0,
+    "msaa": false,
+    "simpleFlashlight": false,
+    "vsync": false,
+    "windowHeight": 720,
+    "windowWidth": 1280
+}
